@@ -1,0 +1,4 @@
+query,language,country,proxy_country,result_count,round,route
+best running shoes,en,us,us,10,round-1,zenrows_fetch
+coffee grinder reviews,en,us,us,10,round-1,zenrows_fetch
+weather forecast london,en,gb,gb,10,round-1,zenrows_fetch
