@@ -1,18 +1,53 @@
-# ZenRows SERP validation project
+# Poisoned SERP? How to Scrape Google Search Results Reliably
 
-This repository contains a conservative, evidence-first workflow for collecting Google Search results through ZenRows Fetch and checking whether the returned organic results are complete enough to trust. The project is intentionally narrow in scope: it records what was requested, what was returned, and what still requires human review.
+This project collects Google Search results through Zenrows Fetch and checks the returned payload before treating it as a usable SERP. It records each attempt and compares observed organic-result domains with a manually reviewed, query-specific baseline.
 
-The code does not treat an HTTP 200 as proof of a valid SERP. It records failures, preserves incomplete responses, and compares the observed organic domains against a manually reviewed baseline before calling a capture an anomaly candidate.
+## Features
 
-## What the project does
+- Builds localized Google Search URLs from CSV query records.
+- Sends requests through Zenrows Fetch with `mode=auto` and `extract=auto`.
+- Saves timestamped JSON capture records, including request settings, status, timing, selected response headers, parsed content, and HTML when returned.
+- Preserves API and transport failures as records instead of dropping failed attempts.
+- Separates incomplete, unscorable, baseline-consistent, and anomaly-candidate outcomes.
+- Checks for later same-query captures before marking an anomaly candidate as recovered.
+- Summarizes attempts, failures, incomplete results, elapsed time, and reported credits by route and round.
+- Includes offline tests for collection settings, domain scoring, recovery, and summary counts.
 
-- Builds localized Google Search URLs from a CSV input.
-- Sends requests to the ZenRows Fetch API with `mode=auto` and `extract=auto`.
-- Stores each capture as a JSON record with query settings, status, timing, response headers, parsed content, and raw HTML where available.
-- Keeps failed and incomplete captures in the dataset instead of silently dropping them.
-- Evaluates the observed organic domains against a baseline of reviewed domains.
-- Flags recovery only when a later same-query capture exists within the configured window.
-- Includes offline regression tests to protect the evaluation logic.
+## Prerequisites
+
+- Python 3.10 or later
+- A Zenrows account and API key for live collection
+- Network access to the Zenrows Fetch API
+
+## Installation
+
+1. Clone the repository.
+
+```bash
+git clone https://github.com/FreemanBoss/zenrows-serp-validation.git
+cd zenrows-serp-validation
+```
+
+2. Create and activate a virtual environment.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
+
+3. Install the dependencies.
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+## Configuration
+
+Copy `.env.example` to `.env` and set `ZENROWS_API_KEY` to a key from your Zenrows account. The `.env` file is excluded from version control. Never put a live key in a script, query file, capture, or README.
+
+```dotenv
+ZENROWS_API_KEY=your_api_key
+```
 
 ## Project structure
 
@@ -32,46 +67,33 @@ The code does not treat an HTTP 200 as proof of a valid SERP. It records failure
 ├── baseline.example.json
 ├── queries.csv
 ├── README.md
-├── requirements.txt
-└── .zenrows/
+└── requirements.txt
 ```
 
-## Prerequisites
+`queries.csv` defines the queries and locale settings. `baseline.example.json` demonstrates the expected baseline shape; replace its example domains with manually reviewed domains before interpreting evaluation output. Captures are written to `data/raw/`.
 
-- Python 3.10 or later
-- A ZenRows API key
-- Network access to the ZenRows API
+## How it works
 
-## Installation
+The workflow keeps transport status and payload quality as separate checks:
 
-1. Create and activate a virtual environment.
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
+```text
+queries.csv -> Zenrows Fetch -> timestamped capture JSON
+                                  |
+                                  v
+              payload/count checks -> baseline comparison -> summary
 ```
 
-2. Install the project dependencies.
+The evaluator uses organic results only. A low domain overlap is a review signal, not proof that Google intentionally returned a poisoned SERP. Missing or empty result groups, API errors, and fewer results than requested remain distinct outcomes.
 
-```bash
-pip install -r requirements.txt
-```
+## Running the project
 
-3. Add a local environment variable or `.env` file with the ZenRows key.
-
-```dotenv
-ZENROWS_API_KEY=your_api_key
-```
-
-## Running the collector
-
-Preview a planned run without making requests:
+Preview the request plan without making network calls or spending credits:
 
 ```bash
 python scripts/collect_serps.py --input queries.csv --dry-run
 ```
 
-Run a small, approved collection with a conservative credit cap:
+For an approved live test, first copy `.env.example` to `.env`, set the API key, and specify a credit ceiling. This example limits the run to one query and caps the worst-case estimate at 25 credits:
 
 ```bash
 python scripts/collect_serps.py \
@@ -81,53 +103,51 @@ python scripts/collect_serps.py \
   --max-credit-budget 25
 ```
 
-The collector requires a positive `--max-credit-budget` value in live mode. The default budget check assumes the highest documented Fetch cost of 25 credits per request.
-
-## Evaluating a capture
-
-Create a manually reviewed baseline for the same query and locale. The file should be a JSON object keyed by query and containing normalized hostnames.
-
-```json
-{
-  "best running shoes": ["example.com", "example.org"],
-  "weather forecast london": ["metoffice.gov.uk", "weather.com"]
-}
-```
-
-Then evaluate the collected captures:
+Evaluate captures against a manually reviewed baseline:
 
 ```bash
-python scripts/evaluate_serps.py --input data/raw --baseline baseline.json
+python scripts/evaluate_serps.py --input data/raw --baseline baseline.example.json
 ```
 
-The summary script keeps failed and incomplete captures visible in the totals:
+Summarize attempts, including failed and incomplete responses:
 
 ```bash
 python scripts/summarize_captures.py --input data/raw
 ```
 
-## Method and guardrails
-
-- Keep the Google URL localization aligned with the request country and language.
-- Preserve raw HTML and request metadata when retention is allowed.
-- Record the requested result count and the returned result count separately.
-- Treat a low overlap score as an anomaly candidate, not as proof of poisoning.
-- Require a valid later observation before labeling a candidate as recovered.
-- Keep failures, empty organic sets, and malformed captures distinct from complete results.
-
-## Tests
-
-Run the offline regression suite without API credentials:
+Run the offline regression suite:
 
 ```bash
-pytest
+python -m pytest -q
 ```
 
-The project includes a small set of fixtures that cover parsing, recovery, incomplete responses, and failure counting.
+## Output
 
-## Related notes
+The collector writes one JSON file per attempt under `data/raw/`. A successful response may include parsed SERP groups and HTML; failures retain their status and error evidence. The evaluator and summarizer print JSON to standard output. Live output depends on the query, locale, collection time, API response, and extraction result; this repository does not promise a particular result count or success rate.
 
-- `research-notes.md`: the initial three-query smoke test and its limits
-- `test-protocol.md`: a protocol for larger route comparisons and publication gating
+## Technologies
 
-The project is intended for a careful, evidence-based analysis of SERP quality and not for publishing route-comparison claims without a fixed comparison protocol and manual review process.
+- Python
+- Requests
+- python-dotenv
+- pytest
+- Zenrows Fetch API
+
+## Use cases
+
+Use the workflow to inspect SERP payload quality and test conservative screening rules. It is not a statistically representative route benchmark, a ranking-change detector, or proof of intentional SERP poisoning.
+
+## Data sources
+
+The collector retrieves Google Search pages live. `queries.csv` is the sample input, and `baseline.example.json` contains illustrative domains only. Build and review a separate baseline for each query and locale before using evaluation results as evidence.
+
+## Troubleshooting
+
+- `ZENROWS_API_KEY is missing`: copy `.env.example` to `.env` and add a valid key, or export the variable in your shell.
+- A non-200 response: inspect the saved error record and `X-Request-Id`, then check the Zenrows dashboard and documentation.
+- An HTTP 200 with too few organic results: the collector records the requested and returned counts; do not treat the response as a complete SERP.
+- No captures are summarized: confirm that `--input` points to the directory containing the JSON files.
+
+## Related article
+
+This repository accompanies the Zenrows article **“Poisoned SERP? How to Scrape Google Search Results Reliably.”** The article URL will be added here after Zenrows publishes it. The article should link back to this repository.
